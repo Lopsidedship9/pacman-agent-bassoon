@@ -112,7 +112,7 @@ class ReflexCaptureAgent(CaptureAgent):
         self.index = index
         self.role_manager = role_manager  # Shared role manager
         self.game_state_vars = game_state_vars  # Shared game state variables
-
+    
 
     def register_initial_state(self, game_state):
         self.start = game_state.get_agent_position(self.index)
@@ -174,8 +174,26 @@ class ReflexCaptureAgent(CaptureAgent):
         
         successor = self.get_successor(game_state, action)
         my_pos = successor.get_agent_state(self.index).get_position()
-
-        if self.game_state_vars.first_iteration_back == False:
+        my_pos = (int(my_pos[0]), int(my_pos[1]))
+        x = 0
+        walls= game_state.get_walls()
+        mid_line = int(walls.width//2)
+        if self.red:
+            if walls[mid_line][my_pos[1]] == False:
+                min_distance = self.get_maze_distance(my_pos, (mid_line, my_pos[1]))
+            else:
+                for i in range(1, mid_line):
+                    if walls[mid_line-i][my_pos[1]] == False:
+                        min_distance = self.get_maze_distance(my_pos, (mid_line-i, my_pos[1]))
+        else:
+            if walls[mid_line+1][my_pos[1]] == False:
+                min_distance = self.get_maze_distance(my_pos, (mid_line, my_pos[1]))
+            else:
+                for i in range(1, mid_line):
+                    if walls[mid_line+i+1][my_pos[1]] == False:
+                        min_distance = self.get_maze_distance(my_pos, (mid_line+i+1, my_pos[1]))
+        
+        """if self.game_state_vars.first_iteration_back == False:
             min_distance = float('-inf')
             food_list = self.get_food_you_are_defending(successor).as_list()
 
@@ -188,7 +206,7 @@ class ReflexCaptureAgent(CaptureAgent):
             self.game_state_vars.first_iteration_back = True
             self.game_state_vars.have_pased_pos = min_food
         else:
-            min_distance = self.get_maze_distance(my_pos, self.game_state_vars.have_pased_pos)
+            min_distance = self.get_maze_distance(my_pos, self.game_state_vars.have_pased_pos)"""
         return min_distance   
 
     def get_successor(self, game_state, action):
@@ -237,105 +255,61 @@ class ReflexCaptureAgent(CaptureAgent):
 ********************************************************************************************************************************
     '''
     def get_features_defensive(self, game_state, action):
-        """
-        Extract defensive features for evaluating the current state after a given action.
-        """
         features = util.Counter()
         successor = self.get_successor(game_state, action)
 
-        # Current agent's position and state
         my_state = successor.get_agent_state(self.index)
         my_pos = my_state.get_position()
 
-        # Defense state: 1 if on defense, 0 if a pacman
-        features['on_defense'] = 1 if not my_state.is_pacman else 0
+        # Computes whether we're on defense (1) or offense (0)
+        features['on_defense'] = 1
+        if my_state.is_pacman: features['on_defense'] = 0
+#######################################
+        map_width = game_state.get_walls().width  # Width of the grid (map)
+        walls = game_state.get_walls()
+        midline_x = map_width // 2 
 
-        # Get visible enemies who are Pacmen (invaders)
+        # Computes distance to invaders we can see
         enemies = [successor.get_agent_state(i) for i in self.get_opponents(successor)]
-        invaders = [enemy for enemy in enemies if enemy.is_pacman and enemy.get_position() is not None]
+
+        invaders = [a for a in enemies if a.is_pacman and a.get_position() is not None]
         features['num_invaders'] = len(invaders)
-
-        # Handle visible invaders
         if len(invaders) > 0:
-            dists = [self.get_maze_distance(my_pos, invader.get_position()) for invader in invaders]
+            dists = [self.get_maze_distance(my_pos, a.get_position()) for a in invaders]
+            closest_invader_distance = min(dists)
             features['invader_distance'] = min(dists)
+            # Check if any invader is within five squares
+            if closest_invader_distance <= 5:
+                # Reward moving towards the closest invader
+                closest_invader = invaders[dists.index(closest_invader_distance)]
+                target_pos = closest_invader.get_position()
+
+                # Check if the target is on the enemy side of the map
+                if target_pos[0] > midline_x:
+                    # If the target is on the enemy's side, prevent crossing the midline
+                    if my_pos[0] <= midline_x:
+                        # If we're on our side, continue chasing the invader
+                        features['chasing_invader'] = self.get_maze_distance(my_pos, target_pos)
+                    else:
+                        # If we're on the wrong side (past the midline), don't chase
+                        features['chasing_invader'] = -float('inf')  # Penalize for crossing the line
+                else:
+                    # If the invader is still on our side, chase it
+                    features['chasing_invader'] = self.get_maze_distance(my_pos, target_pos)
+
         else:
-            # Handle unseen invaders using noisy distances
-            noisy_distances = successor.get_agent_distances()
-            estimated_positions = self.estimate_opponent_positions(game_state, noisy_distances)
-            if estimated_positions:
-                dists = [self.get_maze_distance(my_pos, pos) for pos in estimated_positions]
-                features['invader_distance'] = min(dists)
-
-        # Penalize stopping
-        if action == Directions.STOP:
-            features['stop'] = 1
-
-        # Penalize reversing direction
-        reverse_dir = Directions.REVERSE[game_state.get_agent_state(self.index).configuration.direction]
-        if action == reverse_dir:
-            features['reverse'] = 1
+            # No invaders visible
+            features['invader_distance'] = 0
+            features['move_towards_invader'] = 0
+##########################################
+        if action == Directions.STOP: features['stop'] = 1
+        rev = Directions.REVERSE[game_state.get_agent_state(self.index).configuration.direction]
+        if action == rev: features['reverse'] = 1
 
         return features
-
-
-    def estimate_opponent_positions(self, game_state, noisy_distances):
-        """
-        Estimate possible positions of opponents using noisy distance readings.
-        """
-        possible_positions = []
-        for opponent_idx in self.get_opponents(game_state):
-            noisy_distance = noisy_distances[opponent_idx]
-            previous_beliefs = self.get_previous_beliefs(opponent_idx)
-
-            # Iterate through potential positions in the belief distribution
-            for pos, prob in previous_beliefs.items():
-                if prob > 0 and abs(self.get_maze_distance(pos, self.get_position())) == noisy_distance:
-                    possible_positions.append(pos)
-
-        # Optionally, display beliefs for debugging
-        self.display_distributions_over_positions([self.get_previous_beliefs(idx) for idx in self.get_opponents(game_state)])
-
-        return possible_positions
-
-
-    def get_previous_beliefs(self, opponent_idx):
-        """
-        Retrieve or initialize belief distributions for an opponent.
-        """
-        if not hasattr(self, 'beliefs'):
-            self.beliefs = {opponent_idx: util.Counter() for opponent_idx in self.get_opponents(self.get_current_observation())}
-
-        if len(self.observation_history) < 2:
-            return self.beliefs[opponent_idx]
-
-        previous_state = self.get_previous_observation()
-        current_state = self.get_current_observation()
-        return self.update_beliefs(previous_state, current_state, opponent_idx)
-
-
-    def update_beliefs(self, prev_state, curr_state, opponent_idx):
-        """
-        Update belief distributions based on noisy readings and observations.
-        """
-        beliefs = self.beliefs[opponent_idx]
-        noisy_distance = curr_state.get_agent_distances()[opponent_idx]
-
-        # Update the belief distribution using Manhattan distance and game rules
-        all_positions = [(x, y) for x in range(curr_state.data.layout.width) for y in range(curr_state.data.layout.height)]
-        new_beliefs = util.Counter()
-        for pos in all_positions:
-            if noisy_distance == self.get_maze_distance(pos, self.get_position()):
-                new_beliefs[pos] = 1.0
-
-        # Normalize beliefs
-        new_beliefs.normalize()
-        self.beliefs[opponent_idx] = new_beliefs
-        return new_beliefs
-
-    
+    #added 'move_towards_invader': 50
     def get_weights_defensive(self, game_state, action):
-        return {'num_invaders': -1000, 'on_defense': 100, 'invader_distance': -10, 'stop': -100, 'reverse': -2}
+        return {'num_invaders': -1000, 'on_defense': 100, 'invader_distance': -10, 'move_towards_invader': 50, 'stop': -100, 'reverse': -2}
     
     '''
 *************************************************************************************************************************
