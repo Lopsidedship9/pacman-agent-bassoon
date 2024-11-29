@@ -51,6 +51,7 @@ class RoleManager:
         return self.roles.get(agent_index, None)
 
     def change_role(self, agent_index, agent_instance, n_food_left):
+        #print(agent_index," Have changed.")
         if self.roles[agent_index] == Role.OFFENSIVE:
             self.roles[agent_index] = Role.DEFENSIVE
             self.need_change[agent_index] = False
@@ -120,7 +121,7 @@ class ReflexCaptureAgent(CaptureAgent):
         self.game_state_vars.initial_food = len(self.get_food(game_state).as_list())      
         #print(self.initial_food)
         
-        print(self.role_manager.roles[self.index])
+        #print(self.role_manager.roles[self.index])
 
     def choose_action(self, game_state):
         """
@@ -171,28 +172,28 @@ class ReflexCaptureAgent(CaptureAgent):
         return random.choice(best_actions)
 
     def go_safe_zone(self, game_state, action):
-        
+        '''
         successor = self.get_successor(game_state, action)
         my_pos = successor.get_agent_state(self.index).get_position()
         my_pos = (int(my_pos[0]), int(my_pos[1]))
-        x = 0
-        walls= game_state.get_walls()
+        walls = game_state.get_walls()
         mid_line = int(walls.width//2)
+        #mid_distance = 0
         if self.red:
-            if walls[mid_line][my_pos[1]] == False:
-                min_distance = self.get_maze_distance(my_pos, (mid_line, my_pos[1]))
+            if walls[mid_line-1][my_pos[1]] == False:
+                min_distance = self.get_maze_distance(my_pos, (mid_line-1, my_pos[1]))
             else:
-                for i in range(1, mid_line):
+                for i in range(2, mid_line):
                     if walls[mid_line-i][my_pos[1]] == False:
                         min_distance = self.get_maze_distance(my_pos, (mid_line-i, my_pos[1]))
         else:
             if walls[mid_line+1][my_pos[1]] == False:
                 min_distance = self.get_maze_distance(my_pos, (mid_line, my_pos[1]))
             else:
-                for i in range(1, mid_line):
+                for i in range(2, mid_line):
                     if walls[mid_line+i+1][my_pos[1]] == False:
                         min_distance = self.get_maze_distance(my_pos, (mid_line+i+1, my_pos[1]))
-        
+        '''
         """if self.game_state_vars.first_iteration_back == False:
             min_distance = float('-inf')
             food_list = self.get_food_you_are_defending(successor).as_list()
@@ -207,6 +208,10 @@ class ReflexCaptureAgent(CaptureAgent):
             self.game_state_vars.have_pased_pos = min_food
         else:
             min_distance = self.get_maze_distance(my_pos, self.game_state_vars.have_pased_pos)"""
+        successor = self.get_successor(game_state, action)
+        my_pos = successor.get_agent_state(self.index).get_position()
+        min_distance = self.get_maze_distance(my_pos, self.start)
+        #print(min_distance)
         return min_distance   
 
     def get_successor(self, game_state, action):
@@ -243,7 +248,7 @@ class ReflexCaptureAgent(CaptureAgent):
         elif food_left < self.game_state_vars.actual_food:
             self.game_state_vars.actual_food = food_left
             self.game_state_vars.food_eat += 1
-        print("Food_eat: ",self.game_state_vars.food_eat," Food_left: ", food_left, " Food_to_eat: ", self.game_state_vars.actual_food)
+        #print("Food_eat: ",self.game_state_vars.food_eat," Food_left: ", food_left, " Food_to_eat: ", self.game_state_vars.actual_food)
 
     def food_obtained(self, n_food):
         #print('Nfood es: ', n_food)
@@ -333,9 +338,17 @@ class ReflexCaptureAgent(CaptureAgent):
             if(self.game_state_vars.food_eat >= 1):
                 min_distance = self.go_safe_zone(game_state, action)
                 features['distance_to_food'] = min_distance
-                if ( self.game_state_vars.have_pased_pos[0] == my_pos[0]):
-                    self.game_state_vars.food_eat = 0
-                    #self.role_manager.change_signal()
+                mid_line = int(game_state.get_walls().width//2)
+                if (self.red):
+                    if( mid_line - 2 == my_pos[0]):
+                        #print('entra red')
+                        self.game_state_vars.food_eat = 0
+                        #self.role_manager.change_signal()
+                else:
+                    if ( mid_line + 2 == my_pos[0]):
+                        #print('entra blue')
+                        self.game_state_vars.food_eat = 0
+                        #self.role_manager.change_signal()
             else:
                 min_distance = min([self.get_maze_distance(my_pos, food) for food in food_list])
                 features['distance_to_food'] = min_distance 
