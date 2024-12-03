@@ -32,19 +32,32 @@ class GameStateVariables:
         self.have_pased_pos = (0.0,0.0)
         self.first_iteration_back = False
         self.timer = 0
+        self.A_point = (0.0,0.0)
+        self.B_point = (0.0,0.0)
+        self.food_timer = 0
+        self.stuck_counter = 0
 
+    def get_A_point(self):
+        if self.A_point == (0.0,0.0):
+            return None
+        else:
+            return self.A_point
         
 
 class RoleManager:
     def __init__(self):
         self.roles = {}  # Diccionario para almacenar roles por índice de agente
         self.need_change = {} # Diccionario para almacenar los valores de si se ha de canviar de rol
+        self.timer = {} 
 
     def set_roles(self, agent1_index, role1, agent2_index, role2):
         self.roles[agent1_index] = role1
         self.need_change[agent1_index] = False
+        self.timer[agent1_index] = 0
         self.roles[agent2_index] = role2
         self.need_change[agent2_index] = False
+        self.timer[agent2_index] = 0
+        
 
 
     def get_role(self, agent_index):
@@ -52,17 +65,22 @@ class RoleManager:
 
     def change_role(self, agent_index, agent_instance, n_food_left):
         #print(agent_index," Have changed.")
-        if self.roles[agent_index] == Role.OFFENSIVE:
+        if self.roles[agent_index] == Role.DEFENSIVE and self.timer[agent_index] >= 98:
+            self.roles[agent_index] = Role.OFFENSIVE
+            self.need_change[agent_index] = False
+            self.timer[agent_index] = 0
+        elif self.roles[agent_index] == Role.OFFENSIVE:
             self.roles[agent_index] = Role.DEFENSIVE
             self.need_change[agent_index] = False
             agent_instance.food_obtained(n_food_left)
+            self.timer[agent_index] = 0
         else:
-            self.roles[agent_index] = Role.OFFENSIVE
-            self.need_change[agent_index] = False
+            self.timer[agent_index] += 1
     
     def change_signal(self):
         for agent_index in self.need_change:
-            self.need_change[agent_index] = True
+            if not self.need_change[agent_index]:  # Solo señaliza si no está activo
+                self.need_change[agent_index] = True
 '''
     def need_change(self, agent_index):
         return self.need_change[agent_index]
@@ -128,20 +146,6 @@ class ReflexCaptureAgent(CaptureAgent):
         Picks among the actions with the highest Q(s,a).
         """
         actions = game_state.get_legal_actions(self.index)
-        '''if self.game_state_vars.first_iteration == False:
-            self.game_state_vars.first_iteration = True
-            successor = self.get_successor(game_state, actions[0])
-            food_list = self.get_food_you_are_defending(successor).as_list()
-            my_pos = successor.get_agent_state(self.index).get_position()
-
-            if len(food_list) > 0: # This should always be True,  but better safe than sorry
-                max_distance = 0
-                for food in food_list:
-                    aux_distance = self.get_maze_distance(my_pos, food)
-                    if max_distance < aux_distance:
-                        max_distance = aux_distance
-                        save_food = food
-                self.game_state_vars.have_pased_pos = save_food'''
 
         # You can profile your evaluation time by uncommenting these lines
         # start = time.time()food_left
@@ -172,42 +176,6 @@ class ReflexCaptureAgent(CaptureAgent):
         return random.choice(best_actions)
 
     def go_safe_zone(self, game_state, action):
-        '''
-        successor = self.get_successor(game_state, action)
-        my_pos = successor.get_agent_state(self.index).get_position()
-        my_pos = (int(my_pos[0]), int(my_pos[1]))
-        walls = game_state.get_walls()
-        mid_line = int(walls.width//2)
-        #mid_distance = 0
-        if self.red:
-            if walls[mid_line-1][my_pos[1]] == False:
-                min_distance = self.get_maze_distance(my_pos, (mid_line-1, my_pos[1]))
-            else:
-                for i in range(2, mid_line):
-                    if walls[mid_line-i][my_pos[1]] == False:
-                        min_distance = self.get_maze_distance(my_pos, (mid_line-i, my_pos[1]))
-        else:
-            if walls[mid_line+1][my_pos[1]] == False:
-                min_distance = self.get_maze_distance(my_pos, (mid_line, my_pos[1]))
-            else:
-                for i in range(2, mid_line):
-                    if walls[mid_line+i+1][my_pos[1]] == False:
-                        min_distance = self.get_maze_distance(my_pos, (mid_line+i+1, my_pos[1]))
-        '''
-        """if self.game_state_vars.first_iteration_back == False:
-            min_distance = float('-inf')
-            food_list = self.get_food_you_are_defending(successor).as_list()
-
-            if len(food_list) > 0: # This should always be True,  but better safe than sorry
-                for food in food_list:
-                    aux_distance = self.get_maze_distance(my_pos, food)
-                    if min_distance < aux_distance:
-                        min_distance = aux_distance
-                        min_food = food
-            self.game_state_vars.first_iteration_back = True
-            self.game_state_vars.have_pased_pos = min_food
-        else:
-            min_distance = self.get_maze_distance(my_pos, self.game_state_vars.have_pased_pos)"""
         successor = self.get_successor(game_state, action)
         my_pos = successor.get_agent_state(self.index).get_position()
         min_distance = self.get_maze_distance(my_pos, self.start)
@@ -269,11 +237,36 @@ class ReflexCaptureAgent(CaptureAgent):
         # Computes whether we're on defense (1) or offense (0)
         features['on_defense'] = 1
         if my_state.is_pacman: features['on_defense'] = 0
-#######################################
-        map_width = game_state.get_walls().width  # Width of the grid (map)
-        walls = game_state.get_walls()
-        midline_x = map_width // 2 
 
+
+#######################################
+        walls = game_state.get_walls()
+        map_width = walls.width  # Width of the grid (map)
+        map_height = walls.height
+        midline_x = map_width // 2 
+        if self.game_state_vars.get_A_point() == None:   
+            if self.red:
+                A_point = (midline_x-4,map_height-3)
+                B_point = (midline_x-4,2)
+            else:
+                A_point = (midline_x+1,map_height-3)
+                B_point = (midline_x+1,2)
+            if walls[A_point[0]][A_point[1]] == True:
+                for i in range(1, A_point[1]):
+                    if walls[A_point[0]][A_point[1]-i] == False:
+                        A_point = (A_point[0],A_point[1]-i)
+                        break
+                
+            if walls[B_point[0]][B_point[1]] == True:
+                for i in range(1, A_point[1]):
+                    if walls[B_point[0]][B_point[1]+i] == False:
+                        B_point = (B_point[0],B_point[1]+i)
+                        break
+            self.game_state_vars.A_point = A_point
+            self.game_state_vars.B_point = B_point
+            print(A_point,B_point)
+            
+        
         # Computes distance to invaders we can see
         enemies = [successor.get_agent_state(i) for i in self.get_opponents(successor)]
 
@@ -289,23 +282,26 @@ class ReflexCaptureAgent(CaptureAgent):
                 closest_invader = invaders[dists.index(closest_invader_distance)]
                 target_pos = closest_invader.get_position()
 
-                # Check if the target is on the enemy side of the map
+                #if self.red:
+                    # Check if the target is on the enemy side of the map
                 if target_pos[0] > midline_x:
-                    # If the target is on the enemy's side, prevent crossing the midline
-                    if my_pos[0] <= midline_x:
-                        # If we're on our side, continue chasing the invader
-                        features['chasing_invader'] = self.get_maze_distance(my_pos, target_pos)
-                    else:
-                        # If we're on the wrong side (past the midline), don't chase
-                        features['chasing_invader'] = -float('inf')  # Penalize for crossing the line
+                        # If the target is on the enemy's side, prevent crossing the midline
+                        if my_pos[0] <= midline_x:
+                            # If we're on our side, continue chasing the invader
+                            features['chasing_invader'] = self.get_maze_distance(my_pos, target_pos)
+                        else:
+                            # If we're on the wrong side (past the midline), don't chase
+                            features['chasing_invader'] = -100  # Penalize for crossing the line
                 else:
-                    # If the invader is still on our side, chase it
-                    features['chasing_invader'] = self.get_maze_distance(my_pos, target_pos)
-
+                        # If the invader is still on our side, chase it
+                        features['chasing_invader'] = self.get_maze_distance(my_pos, target_pos)
+            else:
+                features['patrol_distance'] = self.ghost_patrol(my_pos) 
         else:
             # No invaders visible
             features['invader_distance'] = 0
             features['move_towards_invader'] = 0
+            features['patrol_distance'] = self.ghost_patrol(my_pos)
 ##########################################
         if action == Directions.STOP: features['stop'] = 1
         rev = Directions.REVERSE[game_state.get_agent_state(self.index).configuration.direction]
@@ -314,7 +310,16 @@ class ReflexCaptureAgent(CaptureAgent):
         return features
     #added 'move_towards_invader': 50
     def get_weights_defensive(self, game_state, action):
-        return {'num_invaders': -1000, 'on_defense': 100, 'invader_distance': -10, 'move_towards_invader': 50, 'stop': -100, 'reverse': -2}
+        return {'num_invaders': -1000, 'on_defense': 100, 'invader_distance': -10, 'patrol_distance': -5, 'move_towards_invader': 50, 'patrol_distance': -5, 'stop': -100, 'reverse': -2}
+    
+    def ghost_patrol(self, my_pos):
+        target_pos = self.current_target if hasattr(self, "current_target") else  self.game_state_vars.A_point
+        if my_pos ==  self.game_state_vars.A_point:
+            target_pos =  self.game_state_vars.B_point
+        elif my_pos ==  self.game_state_vars.B_point:
+            target_pos =  self.game_state_vars.A_point
+        self.current_target = target_pos
+        return self.get_maze_distance(my_pos, target_pos)
     
     '''
 *************************************************************************************************************************
@@ -328,11 +333,56 @@ class ReflexCaptureAgent(CaptureAgent):
         food_list = self.get_food(successor).as_list()
         features['successor_score'] = -len(food_list)  # self.get_score(successor)
         my_pos = successor.get_agent_state(self.index).get_position()
+        theres_ghost = False
+        its_stuck = False
+        
+        if self.game_state_vars.food_timer >= 150:
+            theres_ghost = False
+            self.game_state_vars.food_timer = 0
+            self.game_state_vars.stuck_counter += 1
+        else:
+            self.game_state_vars.food_timer += 1
+
+
+        
+        enemies = [successor.get_agent_state(i) for i in self.get_opponents(successor)]
+        ghosts = [e for e in enemies if not e.is_pacman and e.get_position() is not None]
+        
+        if ghosts:
+            ghost_dists = [self.get_maze_distance(my_pos, g.get_position()) for g in ghosts]
+            closest_ghost_distance = min(ghost_dists)
+
+            # Umbral para considerar que un fantasma está "cerca"
+            danger_threshold = 5
+            skip_threshold = 2
+            if closest_ghost_distance <= danger_threshold:
+                features['ghost_distance'] = closest_ghost_distance  # Penalizar cercanía a fantasmas
+                theres_ghost = True
+                features['safe_zone_distance'] = 0   
+            else:
+                features['ghost_distance'] = 0  # Sin penalización si están lejos
+                features['safe_zone_distance'] = 0
+            
+            if closest_ghost_distance <= skip_threshold:
+                safe_zone_distance = self.go_safe_zone(game_state, action)
+                features['safe_zone_distance'] = safe_zone_distance
+                return features
+        else:
+            features['ghost_distance'] = 0
+            # Umbral para considerar que un fantasma está "cerca"
+
         if my_pos == self.start and self.game_state_vars.timer >= 20:
             self.role_manager.change_signal()
         elif self.game_state_vars.timer < 20:
             self.game_state_vars.timer += 1
-        
+
+        if my_pos == self.game_state_vars.A_point:
+            its_stuck == False
+            self.game_state_vars.stuck_counter = 0
+
+        if self.game_state_vars.stuck_counter >= 2:
+            its_stuck = True
+  
         # Compute distance to the nearest food      
         if len(food_list) > 0: # This should always be True,  but better safe than sorry
             if(self.game_state_vars.food_eat >= 1):
@@ -349,14 +399,23 @@ class ReflexCaptureAgent(CaptureAgent):
                         #print('entra blue')
                         self.game_state_vars.food_eat = 0
                         #self.role_manager.change_signal()
+            elif theres_ghost == True and its_stuck == False:
+                min_distance = max([self.get_maze_distance(my_pos, food) for food in food_list])
+                features['distance_to_food'] = min_distance * 10
+            elif its_stuck == True:
+                min_distance = self.get_maze_distance(my_pos, self.game_state_vars.A_point)
+                features['distance_to_food'] = min_distance * 10
             else:
                 min_distance = min([self.get_maze_distance(my_pos, food) for food in food_list])
-                features['distance_to_food'] = min_distance 
+                features['distance_to_food'] = min_distance
+
         self.manage_food_counter(len(food_list))
+        if self.red:
+            print(self.game_state_vars.stuck_counter)
         return features
 
     def get_weights_offensive(self, game_state, action):
-        return {'successor_score': 100, 'distance_to_food': -1} 
+        return {'successor_score': 100, 'distance_to_food': -1, 'ghost_distance': 10, 'safe_zone_distance': -10} 
       
         
 
